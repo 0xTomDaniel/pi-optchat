@@ -295,7 +295,7 @@ export default function optchat(pi: ExtensionAPI) {
         : `Wait for ${it} to finish, or open ${it} in /optchat agents and press Ctrl+X twice.`] : [],
       ...runs.length > own.length ? [own.length || runs.length > 1 ? 'A connected window\'s agent ends when its window runs /complete or closes.' : 'It ends when that window runs /complete or closes.'] : [],
     ];
-    const why = remote ? 'in a connected window. Run /complete to end this conversation, then open a new Pi window.'
+    const why = remote && !remote.ended ? 'in a connected window. Run /complete to end this conversation, then open a new Pi window.'
       : importing ? 'while an import is open. Close the import dialog or pause the import (Escape), then try again.'
       : !children?.active ? undefined
       : !runs.length ? 'while agents are starting or finishing. Try again in a moment.'
@@ -501,7 +501,7 @@ export default function optchat(pi: ExtensionAPI) {
   };
   pi.registerShortcut(shortcut, { description: 'Inspect OptChat agents, usage and background activity', handler: ctx => inspect(ctx, 'agents') });
   const command = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-    if (remote) { ctx.ui.notify('Manage this profile in its original window. Here use /tell-main or /complete.', 'info'); return; }
+    if (remote && !remote.ended) { ctx.ui.notify('Manage this profile in its original window. Here use /tell-main or /complete.', 'info'); return; }
     if (importing) throw new Error('Close the import dialog before changing profile settings.');
     let action = args.trim();
     if (!action) {
