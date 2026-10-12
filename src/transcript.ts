@@ -177,3 +177,47 @@ export function buildContext(canonical: AgentMessage[], run: AgentMessage[], vie
   });
   return [head, ...messages, ...status && messages.at(-1)?.role !== 'toolResult' ? [{ role: 'user' as const, content: [{ type: 'text' as const, text: status }], timestamp: 0 }] : []];
 }
+
+/** Pi's own estimate for an image when it decides to compact: 4,800 characters, about 1,200 tokens. */
+const IMAGE_CHARS = 4_800;
+/** Characters a message adds to a request: its text, thinking, tool-call arguments and images, as Pi estimates them. Framing is left out. */
+export function messageChars(message: AgentMessage) {
+  if (!('content' in message)) return 0;
+  const { content } = message;
+  if (typeof content === 'string') return content.length;
+  return content.reduce((sum, block) => sum + (block.type === 'text' ? block.text.length : block.type === 'thinking' ? block.thinking.length
+    : block.type === 'toolCall' ? JSON.stringify(block.arguments).length : block.type === 'image' ? IMAGE_CHARS : 0), 0);
+}
+/** The share of the model's window the current turn's verbatim messages may fill before they move into memory (#146): the
+ * profile's Turn refresh threshold, unless `OPTCHAT_REFRESH_AT` gives one (0 turns it off). */
+export function refreshFraction(setting: number, env = process.env.OPTCHAT_REFRESH_AT) {
+  const override = env?.trim() ? Number(env) : NaN;
+  return Number.isFinite(override) ? override : setting;
+}
+/** That share in characters, at ~4 characters a token; none when off or the window is unknown. */
+export function refreshBudget(contextWindow: number | undefined, fraction: number) {
+  return contextWindow && fraction > 0 ? Math.floor(contextWindow * fraction * 4) : undefined;
+}
+const chars = (messages: readonly AgentMessage[]) => messages.reduce((sum, m) => sum + messageChars(m), 0);
+/** Where a refresh would cut the run: the last model reply, so its tool calls and their results stay whole. 0 when there is none after the task. */
+export function lastStep(run: readonly AgentMessage[]) {
+  const task = run.findIndex(m => m.role === 'user'), step = run.findLastIndex(m => m.role === 'assistant');
+  return step > task && task >= 0 ? step : 0;
+}
+/** The run's new `keep` and the size it moves into the view, when what is sent since the last refresh passes the budget.
+ * What stays verbatim (the task and the last step) must fit in half the budget: a bigger last step, such as many parallel
+ * reads, would otherwise pass the budget again on the next call and refresh every call. It waits for a smaller step instead. */
+export function refreshPoint(run: readonly AgentMessage[], keep: number, budget: number | undefined) {
+  const cut = lastStep(run), task = run.find(m => m.role === 'user');
+  if (!budget || cut <= keep) return undefined;
+  const size = chars(run.slice(keep));
+  if (size <= budget || (task ? messageChars(task) : 0) + chars(run.slice(cut)) > budget / 2) return undefined;
+  return { cut, size };
+}
+/** The run as sent after a mid-turn refresh at `keep`: the task verbatim, then the run from `keep` on. Everything between is in the view. */
+export function refreshedRun(run: readonly AgentMessage[], keep: number, note: string): AgentMessage[] {
+  const task = run.find(m => m.role === 'user');
+  if (!keep || !task) return [...run];
+  const content = typeof task.content === 'string' ? [{ type: 'text' as const, text: task.content }] : task.content;
+  return [{ ...task, content: [...content, { type: 'text' as const, text: `\n\n${note}` }] }, ...run.slice(keep)];
+}
