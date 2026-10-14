@@ -178,7 +178,8 @@ export class Children {
     const profile = this.choice();
     const runs = tasks.map(task => {
       const name = task.model ?? `${profile.provider}/${profile.model}`, model = this.find(name);
-      if (!model) throw new Error(`Subagent model unavailable: ${name}. Models you can use: ${this.registry.getAvailable().map(m => `${m.provider}/${m.id}`).join(', ') || 'none'}.`);
+      // Like Pi's own setModel: a named model needs auth, so a guess at a provider the user isn't logged in to fails here, not in the child.
+      if (!model || task.model && !this.registry.hasConfiguredAuth(model)) throw new Error(`Subagent model unavailable: ${name}. Models you can use: ${this.registry.getAvailable().map(m => `${m.provider}/${m.id}`).join(', ') || 'none'}.`);
       return { ...task, model, thinking: task.thinking ?? profile.thinking };
     });
     if (this.closing) throw new Error('Profile is closing.');
